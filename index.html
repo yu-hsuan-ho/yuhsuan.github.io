@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neuroscience Term Explorer</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 為了防止寬內容破壞版面，為表格添加 table-layout: fixed */
+        .results-table {
+            table-layout: fixed;
+            width: 100%;
+        }
+        .results-table td, .results-table th {
+            /* 允許長單字換行 */
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+
+    <!-- 主容器 -->
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
+        
+        <!-- 標題 -->
+        <header class="mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-800">Neuroscience Term Explorer</h1>
+            <!-- 修正：更新副標題 -->
+            <p class="text-lg text-gray-600 mt-1">簡易快速的Neurosynth搜尋頁面</p>
+        </header>
+
+        <!-- 
+            版面修正：
+            將版面改為 flex-col (垂直堆疊)。
+            頂部是查詢區 (grid)，下方是結果區 (flex-1)。
+        -->
+        <div class="flex flex-col gap-8">
+            <!-- 查詢控制區 (頂部) -->
+            <!-- 修正：改為 md:grid-cols-2，使其並排 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                <!-- 1. 尋找關聯術語 -->
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                    <h2 class="text-xl font-semibold text-gray-700 mb-4">1. 尋找關聯術語</h2>
+                    <p class="text-gray-600 mb-3 text-sm">從選單中選擇一個術語，立即尋找其關聯術語。</p>
+                    
+                    <!-- 升級：使用下拉選單 -->
+                    <select id="selectTerm" class="w-full border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
+                        <option value="">正在載入術語...</option>
+                    </select>
+                    <!-- 修正 1: 移除了 Endpoint 說明 -->
+                </div>
+
+                <!-- 2. 查詢研究 (原 3) -->
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                    <h2 class="text-xl font-semibold text-gray-700 mb-4">2. 查詢研究</h2>
+                    <p class="text-gray-600 mb-3 text-sm">使用下拉選單建立一個邏輯查詢 (e.g., "amygdala AND fear")。</p>
+                    
+                    <!-- 升級：查詢建立器 -->
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <select id="queryTerm1" class="w-full sm:w-2/5 border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
+                            <option value="">(術語 1)</option>
+                        </select>
+                        <select id="queryOperator" class="w-full sm:w-1/5 border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option>AND</option>
+                            <option>OR</option>
+                            <option>NOT</option>
+                        </select>
+                        <select id="queryTerm2" class="w-full sm:w-2/5 border border-gray-300 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500" disabled>
+                            <option value="">(術語 2)</option>
+                        </select>
+                    </div>
+                    <!-- END UPDATED SECTION -->
+                    <!-- 修正 1: 移除了 Endpoint 說明 -->
+                </div>
+
+            </div> <!-- 查詢控制區結束 -->
+
+            <!-- 搜尋結果區 (下方) -->
+            <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex flex-col flex-1 min-h-[400px]">
+                <!-- 修正：標題變更 -->
+                <h2 class="text-xl font-semibold text-gray-700 mb-4" id="resultsTitle">搜尋結果</h2>
+                
+                <!-- 載入狀態 -->
+                <div id="loading" class="hidden text-center p-8">
+                    <p class="text-gray-600">正在從 API 獲取資料，請稍候...</p>
+                </div>
+                
+                <!-- 錯誤狀態 -->
+                <div id="error" class="hidden bg-red-100 border border-red-300 text-red-800 rounded-lg p-4">
+                    <!-- 錯誤訊息將由 JS 填入 -->
+                </div>
+
+                <!-- 結果輸出區 -->
+                <div id="resultsOutput" class="flex-1">
+                    <p class="text-gray-500">請在上方選擇一個操作來開始搜尋。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center text-gray-500 mt-12">
+            <!-- 修正 3: 移除了頁尾文字 -->
+        </footer>
+    </div>
+
+    <script>
+        // API 基礎 URL
+        const API_BASE_URL = 'https://hpc.psy.ntu.edu.tw:5000';
+
+        // DOM 元素
+        const selectTerm = document.getElementById('selectTerm');
+        const queryTerm1 = document.getElementById('queryTerm1');
+        const queryTerm2 = document.getElementById('queryTerm2');
+        const queryOperator = document.getElementById('queryOperator');
+        
+        const loading = document.getElementById('loading');
+        const errorEl = document.getElementById('error');
+        const resultsOutput = document.getElementById('resultsOutput');
+        const resultsTitle = document.getElementById('resultsTitle');
+
+        let allTerms = []; // 儲存所有術語
+
+        /**
+         * 顯示載入狀態
+         */
+        function showLoading() {
+            loading.classList.remove('hidden');
+            resultsOutput.innerHTML = '';
+            errorEl.classList.add('hidden');
+        }
+
+        /**
+         * 隱藏載入狀態
+         */
+        function hideLoading() {
+            loading.classList.add('hidden');
+        }
+
+        /**
+         * 顯示錯誤訊息
+         */
+        function showError(message) {
+            hideLoading();
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+            resultsOutput.innerHTML = '<p class="text-red-600">操作失敗。</p>';
+        }
+
+        /**
+         * 呼叫 API
+         */
+        async function fetchAPI(endpoint) {
+            showLoading();
+            resultsOutput.innerHTML = '';
+            resultsTitle.textContent = '搜尋結果'; // 重設標題
+
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`);
+                if (!response.ok) {
+                    throw new Error(`API 請求失敗，狀態碼: ${response.status} (${response.statusText})`);
+                }
+                const data = await response.json();
+                return data;
+            } catch (err) {
+                console.error('API 呼叫失敗:', err);
+                showError(`呼叫 ${endpoint} 時發生錯誤: ${err.message}`);
+                return null;
+            }
+        }
+
+        /**
+         * 建立關聯術語表格 (co_count, jaccard, term)
+         */
+        function buildAssociatedTermsTable(data) {
+            const table = document.createElement('table');
+            table.className = 'min-w-full divide-y divide-gray-200 results-table';
+            
+            const thead = document.createElement('thead');
+            thead.className = 'bg-gray-50';
+            const trHead = document.createElement('tr');
+            const headers = ['Term', 'Jaccard', 'Co-Count'];
+            
+            headers.forEach(h => {
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+                th.textContent = h;
+                trHead.appendChild(th);
+            });
+            thead.appendChild(trHead);
+            
+            const tbody = document.createElement('tbody');
+            tbody.className = 'bg-white divide-y divide-gray-200';
+            
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+                const values = [
+                    item.term || 'N/A',
+                    item.jaccard ? parseFloat(item.jaccard).toFixed(4) : 'N/A',
+                    item.co_count || 'N/A'
+                ];
+                
+                values.forEach(val => {
+                    const td = document.createElement('td');
+                    td.className = 'px-4 py-3 whitespace-nowrap text-sm text-gray-700';
+                    td.textContent = val;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            resultsOutput.appendChild(table);
+        }
+
+        /**
+         * 建立研究表格 (Title, Authors, Year)
+         */
+        function buildStudiesTable(data) {
+            const table = document.createElement('table');
+            table.className = 'min-w-full divide-y divide-gray-200 results-table';
+            
+            const thead = document.createElement('thead');
+            thead.className = 'bg-gray-50';
+            const trHead = document.createElement('tr');
+            // 修正 2: 簡化表格欄位
+            const headers = ['Title', 'Authors', 'Year']; 
+            
+            headers.forEach(h => {
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+                th.textContent = h;
+                if (h === 'Title') th.style.width = '50%'; // 讓標題欄寬一點
+                trHead.appendChild(th);
+            });
+            thead.appendChild(trHead);
+            
+            const tbody = document.createElement('tbody');
+            tbody.className = 'bg-white divide-y divide-gray-200';
+            
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+                // 修正 2: 簡化表格欄位
+                const values = [
+                    item.title || 'N/A',
+                    Array.isArray(item.authors) ? item.authors.join(', ') : (item.authors || 'N/A'),
+                    item.year || 'N/A'
+                ];
+                
+                values.forEach(val => {
+                    const td = document.createElement('td');
+                    td.className = 'px-4 py-3 text-sm text-gray-700 align-top';
+                    td.textContent = val;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            
+            table.appendChild(thead);
+            table.appendChild(tbody);
+            resultsOutput.appendChild(table);
+        }
+
+        /**
+         * 建立 <pre> 區塊來顯示原始 JSON (備用)
+         */
+        function buildPre(data) {
+            const pre = document.createElement('pre');
+            pre.className = 'bg-gray-900 text-white p-4 rounded-lg overflow-auto text-sm';
+            pre.textContent = JSON.stringify(data, null, 2);
+            resultsOutput.appendChild(pre);
+        }
+
+        /**
+         * 顯示 API 回應 (表格或 JSON)
+         */
+        function displayResult(data, title, endpoint) {
+            hideLoading();
+            resultsOutput.innerHTML = ''; 
+            // 調整 resultsOutput 的樣式，使其適合滾動
+            resultsOutput.className = 'bg-white border border-gray-200 rounded-lg overflow-auto h-96 max-h-[70vh]';
+
+            // 標題元素 (用於表格頂部)
+            const titleEl = document.createElement('h3');
+            titleEl.className = 'text-lg font-semibold mb-0 p-4 pb-3 text-gray-800 sticky top-0 bg-white border-b border-gray-200 z-10';
+
+            let dataArray = null;
+
+            // 智慧型陣列偵測
+            if (Array.isArray(data)) {
+                dataArray = data;
+            } else if (typeof data === 'object' && data !== null) {
+                // 檢查 'studies', 'related', 'data', 'results'
+                if (Array.isArray(data.studies)) dataArray = data.studies;
+                else if (Array.isArray(data.related)) dataArray = data.related; 
+                else if (Array.isArray(data.data)) dataArray = data.data;
+                else if (Array.isArray(data.results)) dataArray = data.results;
+            }
+
+            if (endpoint.includes('/query')) {
+                // 修正 2: 更新標題以包含文章計數
+                if (dataArray && dataArray.length > 0) {
+                    // 修正：移除雙引號
+                    titleEl.textContent = `${title} 共 ${dataArray.length} 篇文章`;
+                    resultsOutput.appendChild(titleEl);
+                    buildStudiesTable(dataArray);
+                } else if (dataArray) {
+                    titleEl.textContent = `${title} 共 0 篇文章`;
+                    resultsOutput.appendChild(titleEl);
+                    resultsOutput.innerHTML += '<p class="p-4 text-gray-600">找不到符合查詢的研究。</p>';
+                } else {
+                    // 備用：顯示 JSON
+                    titleEl.textContent = title; // 保持原標題 (發生錯誤時)
+                    resultsOutput.appendChild(titleEl);
+                    resultsOutput.innerHTML += '<p class="p-4 text-gray-600">收到了非預期的回應格式。顯示原始 JSON：</p>';
+                    buildPre(data);
+                }
+            } else if (endpoint.includes('/terms/')) {
+                // 關聯術語
+                titleEl.textContent = title; 
+                resultsOutput.appendChild(titleEl);
+                 if (dataArray && dataArray.length > 0) {
+                    buildAssociatedTermsTable(dataArray);
+                } else if (dataArray) {
+                    resultsOutput.innerHTML += '<p class="p-4 text-gray-600">找不到關聯術語。</p>';
+                } else {
+                    // 備用：顯示 JSON
+                    resultsOutput.innerHTML += '<p class="p-4 text-gray-600">收到了非預期的回應格式。顯示原始 JSON：</p>';
+                    buildPre(data);
+                }
+            } else {
+                // 其他端點 (例如 /terms)
+                titleEl.textContent = title;
+                resultsOutput.appendChild(titleEl);
+                buildPre(data);
+            }
+        }
+
+        /**
+         * 填充下拉選單
+         */
+        async function populateDropdown() {
+            try {
+                const data = await fetchAPI('/terms');
+                if (!data) throw new Error('API /terms 未返回資料');
+
+                // (4:10 PM 修正) 
+                // 健壯的陣列查找：自動查找回應中的第一個陣列
+                let termsArray = null;
+                if (Array.isArray(data)) {
+                    termsArray = data;
+                } else if (typeof data === 'object' && data !== null) {
+                    // 遍歷物件的 key，找到第一個值為陣列的 key
+                    for (const key in data) {
+                        if (Array.isArray(data[key])) {
+                            termsArray = data[key];
+                            break; // 找到第一個就跳出
+                        }
+                    }
+                }
+
+                if (!termsArray) {
+                    throw new Error('API /terms 未返回陣列 (已檢查物件內部)');
+                }
+
+                allTerms = termsArray.sort(); // 排序術語
+                
+                // 清空佔位符
+                selectTerm.innerHTML = '<option value="">請選擇一個術語...</option>';
+                queryTerm1.innerHTML = '<option value="">請選擇術語 1...</option>';
+                queryTerm2.innerHTML = '<option value="">請選擇術語 2...</option>';
+
+                // 填充所有術語選單
+                allTerms.forEach(term => {
+                    const option1 = document.createElement('option');
+                    option1.value = term;
+                    option1.textContent = term;
+                    selectTerm.appendChild(option1);
+
+                    const option2 = document.createElement('option');
+                    option2.value = term;
+                    option2.textContent = term;
+                    queryTerm1.appendChild(option2.cloneNode(true));
+                    queryTerm2.appendChild(option2.cloneNode(true));
+                });
+                
+                // 啟用選單
+                selectTerm.disabled = false;
+                queryTerm1.disabled = false;
+                queryTerm2.disabled = false;
+
+            } catch (err) {
+                console.error(err);
+                showError(`無法載入術語: ${err.message}`);
+                selectTerm.innerHTML = '<option value="">載入術語失敗</option>';
+                queryTerm1.innerHTML = '<option value="">載入失敗</option>';
+                queryTerm2.innerHTML = '<option value="">載入失敗</option>';
+            }
+        }
+
+        /**
+         * 處理關聯術語的選單變更
+         */
+        async function handleTermSelectChange(event) {
+            const term = event.target.value;
+            if (!term) {
+                resultsOutput.innerHTML = '<p class="text-gray-500">請在上方選擇一個操作來開始搜尋。</p>';
+                resultsTitle.textContent = '搜尋結果';
+                return;
+            }
+            
+            const endpoint = `/terms/${term}`;
+            const data = await fetchAPI(endpoint);
+            if (data) {
+                displayResult(data, `"${term}" 的關聯術語`, endpoint);
+            }
+        }
+
+        /**
+         * 處理查詢建立器的變更
+         */
+        async function handleQueryBuilderChange() {
+            const t1 = queryTerm1.value;
+            const op = queryOperator.value;
+            const t2 = queryTerm2.value;
+
+            // 必須選擇兩個術語
+            if (!t1 || !t2) {
+                // 如果是剛開始操作，不要顯示錯誤，保持初始狀態
+                if (!t1 && !t2) {
+                     resultsOutput.innerHTML = '<p class="text-gray-500">請在上方選擇一個操作來開始搜尋。</p>';
+                     resultsTitle.textContent = '搜尋結果';
+                }
+                return;
+            }
+            
+            const queryString = `${t1} ${op} ${t2}`;
+            const endpoint = `/query/${queryString}/studies`;
+            const data = await fetchAPI(endpoint);
+            if (data) {
+                displayResult(data, `查詢 "${queryString}" 的研究結果`, endpoint);
+            }
+        }
+
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 載入所有術語
+            populateDropdown();
+
+            // 綁定事件監聽器
+            selectTerm.addEventListener('change', handleTermSelectChange);
+            
+            queryTerm1.addEventListener('change', handleQueryBuilderChange);
+            queryOperator.addEventListener('change', handleQueryBuilderChange);
+            queryTerm2.addEventListener('change', handleQueryBuilderChange);
+        });
+    </script>
+</body>
+</html>
+
+
